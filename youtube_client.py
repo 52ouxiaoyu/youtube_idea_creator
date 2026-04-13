@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from urllib.parse import urlparse
 from typing import Any, Callable, Dict, List, Optional
@@ -15,6 +16,10 @@ from .utils import build_comment_url, extract_video_id
 
 
 logger = get_logger(__name__)
+
+
+class CommentsDisabledError(RuntimeError):
+    """Raised when a YouTube video has comments disabled."""
 
 
 class YouTubeCommentScraper:
@@ -96,16 +101,24 @@ class YouTubeCommentScraper:
         while True:
             page_index += 1
             logger.info("requesting commentThreads page=%s video_id=%s", page_index, video_id)
-            response = self._execute_with_retry(
-                self.service.commentThreads()
-                .list(
-                    part="snippet,replies",
-                    videoId=video_id,
-                    maxResults=100,
-                    pageToken=page_token,
-                    textFormat="plainText",
+            try:
+                response = self._execute_with_retry(
+                    self.service.commentThreads()
+                    .list(
+                        part="snippet,replies",
+                        videoId=video_id,
+                        maxResults=100,
+                        pageToken=page_token,
+                        textFormat="plainText",
+                    )
                 )
-            )
+            except CommentsDisabledError:
+                logger.warning(
+                    "comments are disabled for video_id=%s title=%s; skipping comment fetch",
+                    video_id,
+                    video_title,
+                )
+                return records
             items = response.get("items", [])
             logger.info(
                 "received commentThreads page=%s items=%s next_page=%s",
@@ -143,7 +156,7 @@ class YouTubeCommentScraper:
                             high_signal_target=high_signal_target,
                             record_signal=record_signal,
                             target_reached=target_reached,
-                            )
+                        )
                     )
 
                 if target_reached():
@@ -321,13 +334,17 @@ class YouTubeCommentScraper:
             except HttpError as exc:
                 last_error = exc
                 status = getattr(exc.resp, "status", None)
+                reason = self._extract_http_error_reason(exc)
                 logger.warning(
-                    "http error status=%s attempt=%s/%s: %s",
+                    "http error status=%s reason=%s attempt=%s/%s: %s",
                     status,
+                    reason or "unknown",
                     attempt + 1,
                     self.max_retries + 1,
                     exc,
                 )
+                if status == 403 and reason == "commentsDisabled":
+                    raise CommentsDisabledError("comments are disabled for this video") from exc
                 if status not in {403, 429, 500, 503} or attempt == self.max_retries:
                     raise
                 time.sleep(self.backoff_base_seconds * (2**attempt))
@@ -346,6 +363,25 @@ class YouTubeCommentScraper:
         if last_error:
             raise last_error
         raise RuntimeError("Unexpected API retry state.")
+
+    def _extract_http_error_reason(self, exc: HttpError) -> str:
+        content = getattr(exc, "content", b"")
+        if not content:
+            return ""
+        try:
+            payload = json.loads(content.decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            return ""
+
+        errors = payload.get("error", {}).get("errors", [])
+        for error in errors:
+            reason = error.get("reason")
+            if reason:
+                return str(reason)
+        message = payload.get("error", {}).get("message", "")
+        if "commentsDisabled" in message:
+            return "commentsDisabled"
+        return ""
 
     def fetch_most_popular_videos(
         self,

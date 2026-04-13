@@ -251,6 +251,10 @@ ollama list
 - 适当提高 `TARGET_HIGH_SIGNAL_COMMENTS_PER_VIDEO`
 - 让 `POPULAR_ANALYSIS_FLOOR` 保持在 `3` 或 `5`
 
+### 6. `commentsDisabled`
+
+这表示某个热门视频关闭了评论。脚本会自动跳过这类视频并继续处理其它视频，不会因此中断整轮任务。
+
 ## 推荐起步参数
 
 如果你只是想先看一版结果，建议：
