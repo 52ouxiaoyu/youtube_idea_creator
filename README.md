@@ -86,6 +86,8 @@ POPULAR_FETCH_MULTIPLIER=3
 POPULAR_ANALYSIS_FLOOR=3
 PREFERRED_CATEGORY_IDS=26,27,28
 DEPRIORITIZED_CATEGORY_IDS=1,10,20,23,24
+DEDUPE_STATE_PATH=outputs/idea_creator_seen.json
+RESET_DEDUPE=0
 
 MAX_COMMENTS_PER_VIDEO=25
 MAX_COMMENT_PAGES_PER_VIDEO=20
@@ -112,6 +114,8 @@ BATCH_SIZE=8
 - `POPULAR_FETCH_MULTIPLIER`：热门榜抓取扩展倍率，用来扩大候选池。
 - `PREFERRED_CATEGORY_IDS`：优先类别，默认偏向 `Howto & Style / Education / Science & Technology`。
 - `DEPRIORITIZED_CATEGORY_IDS`：默认后排的类别，主要是更偏娱乐和泛内容的分类。
+- `DEDUPE_STATE_PATH`：保存“已看过的视频 / 评论”的状态文件路径。
+- `RESET_DEDUPE`：设为 `1` 时清空去重缓存。
 - `MAX_COMMENT_PAGES_PER_VIDEO`：单个视频最多翻多少页顶层评论，防止极端视频耗时过长。
 - `MAX_REPLY_PAGES_PER_THREAD`：单条评论下最多翻多少页回复。
 - `TARGET_HIGH_SIGNAL_COMMENTS_PER_VIDEO`：达到多少条高信号评论后可以提前停止继续翻页。
@@ -153,6 +157,7 @@ python -m youtube_idea_creator --popular-mode --region-code US --popular-count 3
 - `--provider`：覆盖 `.env` 中的 AI 提供商
 - `--output-dir`：覆盖输出目录
 - `--skip-preflight`：跳过启动前网络 / 模型检查
+- `--reset-dedupe`：清空去重缓存
 
 可以查看完整帮助：
 

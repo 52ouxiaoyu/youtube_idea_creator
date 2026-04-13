@@ -115,7 +115,7 @@ class IdeaCreatorYouTubeEdition:
                     self.config.deprioritized_category_ids,
                     self.dedupe_store.seen_video_ids,
                 )
-            skipped_seen_videos = len(popular_videos) - len(selected_videos)
+            skipped_seen_videos = sum(1 for video in popular_videos if self.dedupe_store.is_seen_video(video.video_id))
             logger.info(
                 "fetched %s popular videos, selected %s for analysis (preferred categories=%s, deprioritized categories=%s, skipped_seen=%s)",
                 len(popular_videos),
