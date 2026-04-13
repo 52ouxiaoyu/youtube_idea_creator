@@ -218,7 +218,7 @@ ollama run qwen3.5:9b "hello"
 
 ### 1. `No module named youtube_idea_creator`
 
-通常是因为你不在仓库根目录。请切到 `/Volumes/ORICO/redbook` 再运行。
+通常是因为你不在仓库根目录。
 
 ### 2. `Unable to find the server at www.googleapis.com`
 
