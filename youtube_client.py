@@ -366,10 +366,21 @@ class YouTubeCommentScraper:
 
     def _extract_http_error_reason(self, exc: HttpError) -> str:
         content = getattr(exc, "content", b"")
+        text = ""
         if not content:
-            return ""
+            text = str(exc)
+        else:
+            try:
+                text = content.decode("utf-8")
+            except Exception:  # noqa: BLE001
+                text = str(content)
+
+        lowered = text.lower()
+        if "commentsdisabled" in lowered or "has disabled comments" in lowered:
+            return "commentsDisabled"
+
         try:
-            payload = json.loads(content.decode("utf-8"))
+            payload = json.loads(text)
         except Exception:  # noqa: BLE001
             return ""
 
@@ -379,7 +390,7 @@ class YouTubeCommentScraper:
             if reason:
                 return str(reason)
         message = payload.get("error", {}).get("message", "")
-        if "commentsDisabled" in message:
+        if "commentsdisabled" in message.lower() or "has disabled comments" in message.lower():
             return "commentsDisabled"
         return ""
 

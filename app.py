@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from datetime import datetime
 from pathlib import Path
+import os
 
 try:
     from dotenv import load_dotenv
@@ -17,6 +18,7 @@ from .exporter import ResultExporter
 from .logging_utils import configure_logging, get_logger, timed_step
 from .preflight import run_preflight_checks
 from .pain_filter import PainPointFilter
+from .dedupe_store import DeduplicationStore
 from .youtube_client import YouTubeCommentScraper
 
 
@@ -44,6 +46,9 @@ class IdeaCreatorYouTubeEdition:
             base_url=config.ai_base_url,
         )
         self.exporter = ResultExporter()
+        self.dedupe_store = DeduplicationStore.load(config.dedupe_state_path)
+        if config.reset_dedupe:
+            self.dedupe_store.clear()
 
     async def run_single(self, video_url: str) -> Path:
         with timed_step(logger, "single-video pipeline"):
@@ -103,16 +108,21 @@ class IdeaCreatorYouTubeEdition:
             if category_id:
                 selected_videos = popular_videos[:analysis_target_count]
             else:
-                selected_videos = self._select_preferred_popular_videos(
+                selected_videos = self._select_popular_videos_for_analysis(
                     popular_videos,
                     analysis_target_count,
                     self.config.preferred_category_ids,
+                    self.config.deprioritized_category_ids,
+                    self.dedupe_store.seen_video_ids,
                 )
+            skipped_seen_videos = len(popular_videos) - len(selected_videos)
             logger.info(
-                "fetched %s popular videos, selected %s for analysis (preferred categories=%s)",
+                "fetched %s popular videos, selected %s for analysis (preferred categories=%s, deprioritized categories=%s, skipped_seen=%s)",
                 len(popular_videos),
                 len(selected_videos),
                 ",".join(self.config.preferred_category_ids),
+                ",".join(self.config.deprioritized_category_ids),
+                skipped_seen_videos,
             )
 
             all_comments = []
@@ -139,7 +149,22 @@ class IdeaCreatorYouTubeEdition:
                     len(video_comments),
                     video.title,
                 )
-                all_comments.extend(video_comments)
+                new_comments = []
+                for comment in video_comments:
+                    if self.dedupe_store.is_seen_comment(comment.comment_id):
+                        continue
+                    new_comments.append(comment)
+                    self.dedupe_store.mark_comment(comment.comment_id)
+
+                self.dedupe_store.mark_video(video.video_id)
+                all_comments.extend(new_comments)
+                self.dedupe_store.save()
+                logger.info(
+                    "dedupe filtered video=%s kept_new_comments=%s seen_comments=%s",
+                    video.video_id,
+                    len(new_comments),
+                    len(video_comments) - len(new_comments),
+                )
 
             logger.info("total comments collected before filter: %s", len(all_comments))
             filtered = self.filter.filter(all_comments)
@@ -193,18 +218,37 @@ class IdeaCreatorYouTubeEdition:
 
         return limited
 
-    def _select_preferred_popular_videos(self, videos, target_count: int, preferred_category_ids):
+    def _select_popular_videos_for_analysis(
+        self,
+        videos,
+        target_count: int,
+        preferred_category_ids,
+        deprioritized_category_ids,
+        seen_video_ids,
+    ):
         preferred_ids = {str(category_id) for category_id in preferred_category_ids if str(category_id)}
+        deprioritized_ids = {str(category_id) for category_id in deprioritized_category_ids if str(category_id)}
+        seen_ids = {str(video_id) for video_id in seen_video_ids if str(video_id)}
         if not preferred_ids:
-            return videos[:target_count]
+            preferred_ids = set()
 
-        preferred = [video for video in videos if video.category_id in preferred_ids]
-        fallback = [video for video in videos if video.category_id not in preferred_ids]
+        def category_rank(video):
+            category_id = str(video.category_id or "")
+            if category_id in preferred_ids:
+                return 0
+            if category_id in deprioritized_ids:
+                return 2
+            return 1
 
-        selected = preferred[:target_count]
-        if len(selected) < target_count:
-            selected.extend(fallback[: target_count - len(selected)])
-        return selected[:target_count]
+        ranked_videos = sorted(
+            videos,
+            key=lambda video: (
+                category_rank(video),
+                -int(getattr(video, "view_count", 0) or 0),
+            ),
+        )
+        unseen_videos = [video for video in ranked_videos if video.video_id not in seen_ids]
+        return unseen_videos[:target_count]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -221,6 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--category-id", default=None, help="可选的视频分类 ID")
     parser.add_argument("--max-comments-per-video", type=int, default=25, help="每个视频最多保留多少条评论用于分析")
     parser.add_argument("--skip-preflight", action="store_true", help="跳过启动前网络检查")
+    parser.add_argument("--reset-dedupe", action="store_true", help="重置已处理视频/评论缓存")
     return parser
 
 
@@ -241,6 +286,10 @@ async def run_cli() -> None:
         config.max_comments_per_video = args.max_comments_per_video
     if args.skip_preflight:
         config.skip_preflight = True
+    if args.reset_dedupe:
+        config.reset_dedupe = True
+    if not os.getenv("DEDUPE_STATE_PATH"):
+        config.dedupe_state_path = config.output_dir / "idea_creator_seen.json"
 
     configure_logging(config.log_level)
     logger.info(
@@ -263,11 +312,13 @@ async def run_cli() -> None:
     app = IdeaCreatorYouTubeEdition(config)
     if args.popular_mode:
         logger.info(
-            "mode=popular region=%s popular_count=%s max_comments_per_video=%s category=%s",
+            "mode=popular region=%s popular_count=%s max_comments_per_video=%s category=%s dedupe_state=%s reset_dedupe=%s",
             args.region_code,
             args.popular_count,
             config.max_comments_per_video,
             args.category_id or "all",
+            config.dedupe_state_path,
+            config.reset_dedupe,
         )
         await app.run_popular(
             region_code=args.region_code,

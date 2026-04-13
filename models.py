@@ -38,6 +38,7 @@ class AnalysisItem:
     video_title: str
     video_url: str
     comment_url: str
+    comment_translation_zh: str
     pain_point: str
     tool_concept: str
     difficulty_stars: int

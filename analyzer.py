@@ -113,11 +113,12 @@ class AIAnalyzer:
             ]
 
             prompt = {
-                "task": "提炼真实需求，输出中文 JSON。",
+                "task": "提炼真实需求，并把评论翻译成自然中文，输出中文 JSON。",
                 "output_schema": {
                     "items": [
                         {
                             "index": 1,
+                            "comment_translation_zh": "评论中文翻译",
                             "pain_point": "具体麻烦",
                             "tool_concept": "核心功能",
                             "difficulty_stars": 3,
@@ -127,7 +128,8 @@ class AIAnalyzer:
                 "rules": [
                     "只返回 JSON。",
                     "顶层必须只有 items 字段。",
-                    "每一项必须包含 index, pain_point, tool_concept, difficulty_stars。",
+                    "每一项必须包含 index, comment_translation_zh, pain_point, tool_concept, difficulty_stars。",
+                    "comment_translation_zh 必须是原评论内容的自然中文翻译。",
                     "pain_point 和 tool_concept 必须全部使用中文。",
                     "pain_point 只写具体麻烦，不要泛化。",
                     "tool_concept 只写核心功能，不要展开实现细节。",
@@ -145,12 +147,13 @@ class AIAnalyzer:
                         results = await self._analyze_with_ollama(batch, prompt)
                     else:
                         results = await self._analyze_with_gemini(batch, prompt)
+                    results = await self._ensure_comment_translations(results)
                     logger.info("batch analyzed successfully size=%s", len(results))
                     return results
                 except Exception as exc:  # noqa: BLE001
                     if attempt == 2:
                         logger.exception("batch failed after retries: %s", exc)
-                        return self._fallback(batch)
+                        return await self._ensure_comment_translations(self._fallback(batch))
                     logger.warning(
                         "batch attempt=%s failed, retrying: %s",
                         attempt + 1,
@@ -158,7 +161,7 @@ class AIAnalyzer:
                     )
                     await asyncio.sleep(2**attempt)
 
-            return self._fallback(batch)
+            return await self._ensure_comment_translations(self._fallback(batch))
 
     async def _analyze_with_openai(
         self,
@@ -374,6 +377,8 @@ class AIAnalyzer:
                     video_title=source.record.video_title,
                     video_url=source.record.video_url,
                     comment_url=source.record.comment_url,
+                    comment_translation_zh=str(raw.get("comment_translation_zh", "")).strip()
+                    or self._fallback_comment_translation_cn(source.record.comment_text),
                     pain_point=str(raw.get("pain_point", "")).strip() or "未能稳定提炼痛点",
                     tool_concept=str(raw.get("tool_concept", "")).strip() or "建议进一步人工复核工具方向",
                     difficulty_stars=max(1, min(5, difficulty_int)),
@@ -399,6 +404,7 @@ class AIAnalyzer:
                     video_title=item.record.video_title,
                     video_url=item.record.video_url,
                     comment_url=item.record.comment_url,
+                    comment_translation_zh=self._fallback_comment_translation_cn(item.record.comment_text),
                     pain_point=self._fallback_pain_point_cn(item),
                     tool_concept=self._fallback_tool_concept_cn(item),
                     difficulty_stars=min(5, max(1, 2 + len(item.matched_keywords) // 2)),
@@ -412,6 +418,168 @@ class AIAnalyzer:
             )
         logger.info("fallback produced %s items", len(results))
         return results
+
+    async def _ensure_comment_translations(self, items: List[AnalysisItem]) -> List[AnalysisItem]:
+        pending_indices = [
+            idx
+            for idx, item in enumerate(items)
+            if self._needs_translation_repair(item.comment_translation_zh, item.raw_comment)
+        ]
+        if not pending_indices:
+            return items
+
+        pending_comments = [items[idx].raw_comment for idx in pending_indices]
+        logger.info("repairing %s missing comment translations", len(pending_comments))
+        translations = await self._translate_comments_to_zh(pending_comments)
+
+        for item_idx, translation in zip(pending_indices, translations):
+            item = items[item_idx]
+            item.comment_translation_zh = translation or self._fallback_comment_translation_cn(item.raw_comment)
+        return items
+
+    def _needs_translation_repair(self, translation: str, raw_comment: str) -> bool:
+        normalized = " ".join((translation or "").split()).strip()
+        if not normalized:
+            return True
+        if normalized.startswith("（未能自动翻译") or normalized.startswith("(未能自动翻译"):
+            return True
+        raw_language = self._detect_comment_language(raw_comment)
+        if raw_language == "中文":
+            return False
+        return False
+
+    async def _translate_comments_to_zh(self, comments: Sequence[str]) -> List[str]:
+        if not comments:
+            return []
+
+        payload = [
+            {
+                "index": idx,
+                "comment": safe_truncate(comment, 700),
+            }
+            for idx, comment in enumerate(comments, start=1)
+        ]
+        prompt = {
+            "task": "把评论翻译成自然、口语化的中文，只返回 JSON。",
+            "output_schema": {
+                "items": [
+                    {
+                        "index": 1,
+                        "comment_translation_zh": "评论中文翻译",
+                    }
+                ]
+            },
+            "rules": [
+                "只返回 JSON。",
+                "顶层必须只有 items 字段。",
+                "每一项必须包含 index 和 comment_translation_zh。",
+                "comment_translation_zh 必须是自然中文翻译，不要解释。",
+                "不要添加原文、不要加前缀、不要加后缀。",
+                "不要臆造原评论里没有的内容。",
+            ],
+            "comments": payload,
+        }
+
+        if self.provider == "openai":
+            content = await self._translate_with_openai(prompt)
+        elif self.provider == "ollama":
+            content = await self._translate_with_ollama(prompt)
+        else:
+            content = await self._translate_with_gemini(prompt)
+
+        logger.info("translation response received provider=%s raw_chars=%s", self.provider, len(content))
+        parsed = self._safe_json_loads(content)
+        return self._map_translation_results(comments, parsed)
+
+    async def _translate_with_openai(self, prompt: Dict[str, Any]) -> str:
+        assert self._openai_client is not None
+        response = await self._openai_client.chat.completions.create(
+            model=self.model,
+            temperature=0.1,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是一位专业翻译。只用中文输出，只返回合法 JSON。",
+                },
+                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+            ],
+        )
+        return response.choices[0].message.content or "{}"
+
+    async def _translate_with_ollama(self, prompt: Dict[str, Any]) -> str:
+        if self._ollama_bin:
+            prompt_text = json.dumps(prompt, ensure_ascii=False)
+
+            def _run_cli() -> str:
+                cmd = [self._ollama_bin, "run", self.model, "--format", "json"]
+                if OLLAMA_THINK:
+                    cmd.append("--think")
+                else:
+                    cmd.extend(["--think=false", "--hidethinking"])
+                proc = subprocess.run(
+                    cmd + [prompt_text],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=OLLAMA_CLI_TIMEOUT_SECONDS,
+                )
+                if proc.returncode != 0:
+                    stderr = (proc.stderr or "").strip()
+                    raise RuntimeError(stderr or f"ollama CLI exited with code {proc.returncode}")
+                return proc.stdout.strip()
+
+            try:
+                return await asyncio.to_thread(_run_cli)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ollama translation CLI attempt failed, falling back to HTTP API: %s", exc)
+
+        payload = {
+            "model": self.model,
+            "system": "你是一位专业翻译。只用中文输出，只返回合法 JSON。",
+            "prompt": json.dumps(prompt, ensure_ascii=False),
+            "stream": False,
+            "format": "json",
+            "think": OLLAMA_THINK,
+        }
+        url = f"{self._ollama_api_root}/api/generate"
+        async with httpx.AsyncClient(timeout=OLLAMA_HTTP_TIMEOUT_SECONDS) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            body = response.json()
+            return body.get("response") or "{}"
+
+    async def _translate_with_gemini(self, prompt: Dict[str, Any]) -> str:
+        assert self._gemini_model is not None
+        response = await asyncio.to_thread(
+            self._gemini_model.generate_content,
+            json.dumps(prompt, ensure_ascii=False),
+        )
+        return getattr(response, "text", "") or "{}"
+
+    def _map_translation_results(self, comments: Sequence[str], parsed: Dict[str, Any]) -> List[str]:
+        items = parsed.get("items", [])
+        if not isinstance(items, list):
+            return [self._fallback_comment_translation_cn(comment) for comment in comments]
+
+        by_index = {idx: comment for idx, comment in enumerate(comments, start=1)}
+        translations: List[str] = []
+        for idx in range(1, len(comments) + 1):
+            raw_comment = by_index.get(idx, "")
+            translation = ""
+            for raw in items:
+                if not isinstance(raw, dict):
+                    continue
+                item_index = int(raw.get("index", 0) or 0)
+                if item_index != idx:
+                    continue
+                translation = str(raw.get("comment_translation_zh", "")).strip()
+                break
+
+            if not translation:
+                translation = self._fallback_comment_translation_cn(raw_comment)
+            translations.append(translation)
+        return translations
 
     def _detect_comment_language(self, text: str) -> str:
         if not text:
@@ -446,6 +614,14 @@ class AIAnalyzer:
         if matched:
             return f"可以做一个帮助用户解决“{matched}”相关问题的工具，核心能力是自动化处理、简化步骤并降低操作成本。"
         return "可以做一个帮助用户整理、简化并自动化处理相关问题的工具。"
+
+    def _fallback_comment_translation_cn(self, text: str) -> str:
+        normalized = " ".join(text.split()).strip()
+        if not normalized:
+            return "（空评论）"
+        if self._detect_comment_language(normalized) == "中文":
+            return normalized
+        return f"（未能自动翻译，原文：{normalized}）"
 
     @staticmethod
     def _normalize_ollama_api_root(base_url: str) -> str:

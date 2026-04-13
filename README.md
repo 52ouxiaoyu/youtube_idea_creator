@@ -85,6 +85,7 @@ FILTER_MIN_SCORE=3
 POPULAR_FETCH_MULTIPLIER=3
 POPULAR_ANALYSIS_FLOOR=3
 PREFERRED_CATEGORY_IDS=26,27,28
+DEPRIORITIZED_CATEGORY_IDS=1,10,20,23,24
 
 MAX_COMMENTS_PER_VIDEO=25
 MAX_COMMENT_PAGES_PER_VIDEO=20
@@ -110,6 +111,7 @@ BATCH_SIZE=8
 - `POPULAR_ANALYSIS_FLOOR`：热门模式至少分析多少个视频，避免结果太少。
 - `POPULAR_FETCH_MULTIPLIER`：热门榜抓取扩展倍率，用来扩大候选池。
 - `PREFERRED_CATEGORY_IDS`：优先类别，默认偏向 `Howto & Style / Education / Science & Technology`。
+- `DEPRIORITIZED_CATEGORY_IDS`：默认后排的类别，主要是更偏娱乐和泛内容的分类。
 - `MAX_COMMENT_PAGES_PER_VIDEO`：单个视频最多翻多少页顶层评论，防止极端视频耗时过长。
 - `MAX_REPLY_PAGES_PER_THREAD`：单条评论下最多翻多少页回复。
 - `TARGET_HIGH_SIGNAL_COMMENTS_PER_VIDEO`：达到多少条高信号评论后可以提前停止继续翻页。
@@ -169,6 +171,7 @@ python -m youtube_idea_creator --help
 
 - `视频标题`
 - `原评论内容`
+- `中文翻译`
 - `原评论语言`
 - `需求分数`
 - `原评论链接`
@@ -194,7 +197,7 @@ python -m youtube_idea_creator --help
 热门视频模式默认会：
 
 - 优先抓 `Howto & Style / Education / Science & Technology`
-- 如果这些类别不够，再补其它热门视频
+- 如果这些类别不够，再补其它热门视频，但会先避开默认后排的娱乐类目
 - 先多抓一些候选视频，再按评分挑最值得分析的内容
 - 在每个视频里，达到足够多的高信号评论后会提前停止继续翻页
 

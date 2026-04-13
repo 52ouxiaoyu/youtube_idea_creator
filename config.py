@@ -90,8 +90,13 @@ class AppConfig:
     preferred_category_ids: tuple[str, ...] = field(
         default_factory=lambda: _parse_csv_env(os.getenv("PREFERRED_CATEGORY_IDS"), ("26", "27", "28"))
     )
+    deprioritized_category_ids: tuple[str, ...] = field(
+        default_factory=lambda: _parse_csv_env(os.getenv("DEPRIORITIZED_CATEGORY_IDS"), ("1", "10", "20", "23", "24"))
+    )
+    dedupe_state_path: Path = field(default_factory=lambda: Path(os.getenv("DEDUPE_STATE_PATH", "outputs/idea_creator_seen.json")))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     skip_preflight: bool = field(default_factory=lambda: os.getenv("SKIP_PREFLIGHT", "0") == "1")
+    reset_dedupe: bool = field(default_factory=lambda: os.getenv("RESET_DEDUPE", "0") == "1")
 
     def ensure_output_dir(self) -> Path:
         self.output_dir.mkdir(parents=True, exist_ok=True)

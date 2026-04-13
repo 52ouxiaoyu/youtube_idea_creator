@@ -20,8 +20,8 @@ class ResultExporter:
         lines = [
             "# Idea Creator - YouTube Edition",
             "",
-            "| 视频标题 | 原评论内容 | 原评论语言 | 需求分数 | 原评论链接 | 痛点总结 | AI 工具构思 | 预计开发难度 |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| 视频标题 | 原评论内容 | 中文翻译 | 原评论语言 | 需求分数 | 原评论链接 | 痛点总结 | AI 工具构思 | 预计开发难度 |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
 
         for item in rows:
@@ -31,6 +31,7 @@ class ResultExporter:
                     [
                         esc(item.video_title or item.video_id),
                         esc(item.raw_comment),
+                        esc(item.comment_translation_zh),
                         esc(item.comment_language or "未知"),
                         str(item.signal_score),
                         f"[link]({item.comment_url})",
@@ -54,6 +55,7 @@ class ResultExporter:
         headers = [
             "视频标题",
             "原评论内容",
+            "中文翻译",
             "原评论语言",
             "需求分数",
             "原评论链接",
@@ -68,6 +70,7 @@ class ResultExporter:
                 [
                     item.video_title or item.video_id,
                     item.raw_comment,
+                    item.comment_translation_zh,
                     item.comment_language or "未知",
                     item.signal_score,
                     item.comment_url,
@@ -81,10 +84,11 @@ class ResultExporter:
         widths = {
             "A": 42,
             "B": 80,
-            "C": 55,
-            "D": 35,
-            "E": 45,
-            "F": 14,
+            "C": 80,
+            "D": 55,
+            "E": 35,
+            "F": 45,
+            "G": 14,
         }
         for col, width in widths.items():
             ws.column_dimensions[col].width = width
