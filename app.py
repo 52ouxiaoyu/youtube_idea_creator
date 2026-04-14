@@ -105,23 +105,22 @@ class IdeaCreatorYouTubeEdition:
                 max_results=fetch_count,
                 category_id=category_id,
             )
-            if category_id:
-                selected_videos = popular_videos[:analysis_target_count]
-            else:
-                selected_videos = self._select_popular_videos_for_analysis(
-                    popular_videos,
-                    analysis_target_count,
-                    self.config.preferred_category_ids,
-                    self.config.deprioritized_category_ids,
-                    self.dedupe_store.seen_video_ids,
-                )
+            selected_videos = self._select_popular_videos_for_analysis(
+                popular_videos,
+                analysis_target_count,
+                self.config.preferred_category_ids,
+                self.config.deprioritized_category_ids,
+                self.config.blocked_title_keywords,
+                self.dedupe_store.seen_video_ids,
+            )
             skipped_seen_videos = sum(1 for video in popular_videos if self.dedupe_store.is_seen_video(video.video_id))
             logger.info(
-                "fetched %s popular videos, selected %s for analysis (preferred categories=%s, deprioritized categories=%s, skipped_seen=%s)",
+                "fetched %s popular videos, selected %s for analysis (preferred categories=%s, deprioritized categories=%s, blocked_title_keywords=%s, skipped_seen=%s)",
                 len(popular_videos),
                 len(selected_videos),
                 ",".join(self.config.preferred_category_ids),
                 ",".join(self.config.deprioritized_category_ids),
+                ",".join(self.config.blocked_title_keywords),
                 skipped_seen_videos,
             )
 
@@ -224,10 +223,12 @@ class IdeaCreatorYouTubeEdition:
         target_count: int,
         preferred_category_ids,
         deprioritized_category_ids,
+        blocked_title_keywords,
         seen_video_ids,
     ):
         preferred_ids = {str(category_id) for category_id in preferred_category_ids if str(category_id)}
         deprioritized_ids = {str(category_id) for category_id in deprioritized_category_ids if str(category_id)}
+        blocked_keywords = tuple(keyword.strip().lower() for keyword in blocked_title_keywords if keyword and keyword.strip())
         seen_ids = {str(video_id) for video_id in seen_video_ids if str(video_id)}
         if not preferred_ids:
             preferred_ids = set()
@@ -240,9 +241,16 @@ class IdeaCreatorYouTubeEdition:
                 return 2
             return 1
 
+        def title_rank(video):
+            title = (video.title or "").lower()
+            if blocked_keywords and any(keyword in title for keyword in blocked_keywords):
+                return 1
+            return 0
+
         ranked_videos = sorted(
             videos,
             key=lambda video: (
+                title_rank(video),
                 category_rank(video),
                 -int(getattr(video, "view_count", 0) or 0),
             ),

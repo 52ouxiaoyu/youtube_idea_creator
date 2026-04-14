@@ -86,6 +86,7 @@ POPULAR_FETCH_MULTIPLIER=3
 POPULAR_ANALYSIS_FLOOR=3
 PREFERRED_CATEGORY_IDS=26,27,28
 DEPRIORITIZED_CATEGORY_IDS=1,10,20,23,24
+BLOCKED_TITLE_KEYWORDS=trailer,episode,season,finale,movie,film,official music video,music video,diss,clip
 DEDUPE_STATE_PATH=outputs/idea_creator_seen.json
 RESET_DEDUPE=0
 
@@ -114,6 +115,7 @@ BATCH_SIZE=8
 - `POPULAR_FETCH_MULTIPLIER`：热门榜抓取扩展倍率，用来扩大候选池。
 - `PREFERRED_CATEGORY_IDS`：优先类别，默认偏向 `Howto & Style / Education / Science & Technology`。
 - `DEPRIORITIZED_CATEGORY_IDS`：默认后排的类别，主要是更偏娱乐和泛内容的分类。
+- `BLOCKED_TITLE_KEYWORDS`：标题里命中这些词的视频会被进一步后排，尽量减少 trailer / episode / season / film / music video / diss / clip 一类内容。
 - `DEDUPE_STATE_PATH`：保存“已看过的视频 / 评论”的状态文件路径。
 - `RESET_DEDUPE`：设为 `1` 时清空去重缓存。
 - `MAX_COMMENT_PAGES_PER_VIDEO`：单个视频最多翻多少页顶层评论，防止极端视频耗时过长。
@@ -203,6 +205,7 @@ python -m youtube_idea_creator --help
 
 - 优先抓 `Howto & Style / Education / Science & Technology`
 - 如果这些类别不够，再补其它热门视频，但会先避开默认后排的娱乐类目
+- 标题命中 `BLOCKED_TITLE_KEYWORDS` 的视频会再往后排，尽量减少影视、预告、音乐视频、diss clip 一类内容
 - 先多抓一些候选视频，再按评分挑最值得分析的内容
 - 在每个视频里，达到足够多的高信号评论后会提前停止继续翻页
 

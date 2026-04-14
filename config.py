@@ -93,6 +93,12 @@ class AppConfig:
     deprioritized_category_ids: tuple[str, ...] = field(
         default_factory=lambda: _parse_csv_env(os.getenv("DEPRIORITIZED_CATEGORY_IDS"), ("1", "10", "20", "23", "24"))
     )
+    blocked_title_keywords: tuple[str, ...] = field(
+        default_factory=lambda: _parse_csv_env(
+            os.getenv("BLOCKED_TITLE_KEYWORDS"),
+            ("trailer", "episode", "season", "finale", "movie", "film", "official music video", "music video", "diss", "clip"),
+        )
+    )
     dedupe_state_path: Path = field(default_factory=lambda: Path(os.getenv("DEDUPE_STATE_PATH", "outputs/idea_creator_seen.json")))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     skip_preflight: bool = field(default_factory=lambda: os.getenv("SKIP_PREFLIGHT", "0") == "1")
